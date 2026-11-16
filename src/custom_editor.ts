@@ -127,8 +127,29 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
             };
             watcher.onDidChange(reload);
             watcher.onDidCreate(reload);
+            // Fallback: file events are not always delivered for cloud folders (OneDrive /
+            // iCloud use macOS File Provider), so also compare size and time every 2 s.
+            const fsp = require('fs');
+            let last = '';
+            const stamp = () => {
+                try {
+                    const st = fsp.statSync(fsPath);
+                    return st.size + ':' + st.mtimeMs;
+                } catch {
+                    return '';
+                }
+            };
+            last = stamp();
+            const poll = setInterval(() => {
+                const now = stamp();
+                if (now && now !== last) {
+                    last = now;
+                    reload();
+                }
+            }, 2000);
             webviewPanel.onDidDispose(() => {
                 watcher.dispose();
+                clearInterval(poll);
                 if (timer) {
                     clearTimeout(timer);
                 }
