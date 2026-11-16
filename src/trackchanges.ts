@@ -90,7 +90,10 @@ export function insertChanges(html: string, changes: ChangeData[]): string {
         let skip = 0;
         return inner.replace(/(<[^>]*>)|([^<]+)/g, (_t, tag: string, text: string) => {
             if (tag) {
-                if (/^<math\b|^<(ins|del) class="tc"/.test(tag)) { skip++; }
+                if (/^<img\b/.test(tag) && skip === 0) {     // images: marked (and hidden) too
+                    return `<${c.type} class="tc tc-img" title="${title}">${tag}</${c.type}>`;
+                }
+                if (/^<math\b|^<(ins|del) class="tc/.test(tag)) { skip++; }
                 if (/^<\/math>|^<\/(ins|del)>/.test(tag) && skip > 0) { skip--; }
                 return tag;
             }

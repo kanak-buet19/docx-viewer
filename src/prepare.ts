@@ -173,6 +173,9 @@ function pageCss(g: PageSize, font: string | null): string {
         bottom: ${Math.min(0.5, g.bottom / 2)}in; text-align: center; font-size: 11px; opacity: 0.55; }
     ins.tc { color: #1a7f37; text-decoration: underline; text-decoration-color: rgba(26,127,55,0.6); }
     del.tc { color: #c62828; text-decoration: line-through; }
+    del.tc-img img { outline: 3px solid #c62828; opacity: 0.45; }
+    ins.tc-img img { outline: 3px solid #1a7f37; }
+    ins.tc-img, del.tc-img { text-decoration: none; }
     #document.tc-final del.tc { display: none; }
     #document.tc-final ins.tc { color: inherit; text-decoration: none; }
     ::highlight(docx-comment) { background-color: rgba(255, 196, 0, 0.30); }
