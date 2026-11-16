@@ -15,7 +15,8 @@ import { W_NS, XNode, XDoc, placeholderRun } from './prepare';
 
 export interface ChangeData { type: 'ins' | 'del'; author: string; date: string }
 
-const RE_CHANGE = /S(\d+)([\s\S]*?)E\1/g;
+// innermost first: no other change may start inside (a deletion inside an insertion)
+const RE_CHANGE = /\uE004S(\d+)\uE005((?:(?!\uE004S)[\s\S])*?)\uE004E\1\uE005/g;
 const RE_LEFT = /[SE]\d+/g;
 const RE_BREAK = /([rh])/g;
 
@@ -78,23 +79,28 @@ export function markChanges(doc: XDoc): ChangeData[] {
 
 /** Placeholders in mammoth's HTML -> <ins>/<del> around the text pieces, page-break markers. */
 export function insertChanges(html: string, changes: ChangeData[]): string {
-    html = html.replace(RE_CHANGE, (_m, id, inner: string) => {
+    const wrap = (_m: string, id: string, inner: string) => {
         const c = changes[Number(id)];
         if (!c) {
             return inner;
         }
         const title = esc(c.author + (c.date ? ', ' + c.date.slice(0, 10) : ''));
-        // wrap only text between tags (and only text outside <math>, which has its own markup)
-        let inMath = 0;
+        // wrap only text between tags, and not text inside <math> (own markup) or inside a
+        // change already wrapped (a deletion inside an insertion stays a deletion)
+        let skip = 0;
         return inner.replace(/(<[^>]*>)|([^<]+)/g, (_t, tag: string, text: string) => {
             if (tag) {
-                if (/^<math\b/.test(tag)) { inMath++; }
-                if (/^<\/math>/.test(tag)) { inMath--; }
+                if (/^<math\b|^<(ins|del) class="tc"/.test(tag)) { skip++; }
+                if (/^<\/math>|^<\/(ins|del)>/.test(tag) && skip > 0) { skip--; }
                 return tag;
             }
-            return inMath > 0 ? text : `<${c.type} class="tc" title="${title}">${text}</${c.type}>`;
+            return skip > 0 ? text : `<${c.type} class="tc" title="${title}">${text}</${c.type}>`;
         });
-    });
+    };
+    for (let prev = ''; prev !== html;) {            // nested changes: repeat, inner to outer
+        prev = html;
+        html = html.replace(RE_CHANGE, wrap);
+    }
     return html.replace(RE_LEFT, '').replace(RE_BREAK, (_m, k) => `<span class="pb" data-k="${k}"></span>`);
 }
 

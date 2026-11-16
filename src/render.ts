@@ -96,7 +96,7 @@ export class DocumentRenderer {
             <button id="toggleOutline" title="Toggle Outline">${this.outlineVisible ? '◧' : '◨'}</button>
             <button id="themeToggle" title="Toggle Theme">${this.currentTheme === 'dark' ? '☀️' : this.currentTheme === 'light' ? '🌙' : '🔄'}</button>
             <button id="searchBtn" title="Search">🔍</button>
-            <button id="toggleMarkup" title="Tracked changes: showing markup (click for final)">±</button>
+            <button id="toggleMarkup" title="Markup: tracked changes and comments (click: final)">±</button>
             <button id="hideToolbar" title="Hide Toolbar">✕</button>
         </div>
         
@@ -937,6 +937,14 @@ export class DocumentRenderer {
                     return;
                 }
                 doc.querySelectorAll('.cm-card').forEach(c => c.remove());
+                if (doc.classList.contains('no-comments')) {      // clean view
+                    doc.classList.remove('has-comments');
+                    if (typeof CSS !== 'undefined' && CSS.highlights) {
+                        CSS.highlights.delete('docx-comment');
+                        CSS.highlights.delete('docx-comment-active');
+                    }
+                    return;
+                }
                 let list = [];
                 try {
                     list = JSON.parse(dataEl.textContent || '[]');
@@ -1054,18 +1062,27 @@ export class DocumentRenderer {
                 paginate();
                 renderComments();
             }
-            // Tracked changes: markup (insertions green, deletions struck red) or final text.
+            // View, cycled by the button: markup (tracked changes as insertions / deletions,
+            // comments), final (final text, comments), clean (final text only, no comments).
             const markupBtn = document.getElementById('toggleMarkup');
             if (markupBtn) {
-                if (!document.querySelector('#document .tc')) {
-                    markupBtn.style.display = 'none';             // no tracked changes
+                const views = [
+                    { cls: [], icon: '±', title: 'Markup: tracked changes and comments (click: final)' },
+                    { cls: ['tc-final'], icon: '✓', title: 'Final: final text with comments (click: clean)' },
+                    { cls: ['tc-final', 'no-comments'], icon: '◻', title: 'Clean: final text only (click: markup)' },
+                ];
+                let view = 0;
+                if (!document.querySelector('#document .tc') && !document.getElementById('docx-comments')) {
+                    markupBtn.style.display = 'none';             // nothing to show or hide
                 }
+                markupBtn.title = views[0].title;
                 markupBtn.addEventListener('click', () => {
                     const doc = document.getElementById('document');
-                    const final = doc.classList.toggle('tc-final');
-                    markupBtn.title = final ? 'Tracked changes: showing final text (click for markup)'
-                        : 'Tracked changes: showing markup (click for final)';
-                    markupBtn.textContent = final ? '✓' : '±';
+                    view = (view + 1) % views.length;
+                    doc.classList.remove('tc-final', 'no-comments');
+                    views[view].cls.forEach(c => doc.classList.add(c));
+                    markupBtn.textContent = views[view].icon;
+                    markupBtn.title = views[view].title;
                     layout();                                     // heights changed
                 });
             }
