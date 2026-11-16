@@ -780,6 +780,8 @@ export class DocumentRenderer {
                             head.appendChild(c.firstChild);
                         }
                         head.style.marginBottom = '';
+                        head.style.paddingBottom = head.dataset.pb || '';
+                        head.removeAttribute('data-pb');
                         head.normalize();
                         c.remove();
                     }
@@ -822,7 +824,10 @@ export class DocumentRenderer {
                         n.remove();
                         n.setAttribute('data-cont', '1');
                         n.style.marginTop = '0';
+                        n.style.paddingTop = '0';
+                        brk.dataset.pb = brk.style.paddingBottom;
                         brk.style.marginBottom = '0';
+                        brk.style.paddingBottom = '0';
                         newPage();
                         queue.unshift(n);
                         continue;
@@ -836,7 +841,10 @@ export class DocumentRenderer {
                         n.remove();
                         n.setAttribute('data-cont', '1');
                         n.style.marginTop = '0';
+                        n.style.paddingTop = '0';
+                        head.dataset.pb = head.style.paddingBottom;
                         head.style.marginBottom = '0';
+                        head.style.paddingBottom = '0';
                         newPage();
                         queue.unshift(n);
                     } else if (page.childElementCount > 1) {      // move the whole block
@@ -1059,7 +1067,26 @@ export class DocumentRenderer {
                     }
                 }
             }
+            // Word's single line spacing = the font's own line height (CSS "normal"): measure it
+            // for the document font, as a multiple of the font size (--lh, used by paragraphs).
+            function measureLineHeight() {
+                const doc = document.getElementById('document');
+                const pg = doc ? doc.querySelector('.docx-page') : null;
+                if (!pg) {
+                    return;
+                }
+                const probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;visibility:hidden;font-size:100px;line-height:normal;white-space:nowrap;padding:0;margin:0';
+                probe.textContent = 'Hg';
+                pg.appendChild(probe);
+                const lh = probe.offsetHeight / 100;
+                probe.remove();
+                if (lh > 0.8 && lh < 2) {
+                    doc.style.setProperty('--lh', lh.toFixed(4));
+                }
+            }
             function layout() {
+                measureLineHeight();
                 paginate();
                 renderComments();
             }
