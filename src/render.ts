@@ -96,6 +96,7 @@ export class DocumentRenderer {
             <button id="toggleOutline" title="Toggle Outline">${this.outlineVisible ? '◧' : '◨'}</button>
             <button id="themeToggle" title="Toggle Theme">${this.currentTheme === 'dark' ? '☀️' : this.currentTheme === 'light' ? '🌙' : '🔄'}</button>
             <button id="searchBtn" title="Search">🔍</button>
+            <button id="toggleMarkup" title="Tracked changes: showing markup (click for final)">±</button>
             <button id="hideToolbar" title="Hide Toolbar">✕</button>
         </div>
         
@@ -751,6 +752,325 @@ export class DocumentRenderer {
 
             // Initialize theme on load (observer is now ready)
             initializeTheme();
+
+            // Split the document into pages of the document's own size (.docx-page, set by
+            // DocxHandler), as Word does: a paragraph that does not fit is split at the first
+            // line that would cross the bottom margin and continues on the next page; other
+            // blocks (tables, lists, images, display equations) move whole. A block taller than
+            // a page gets a page of its own, which grows. Run again once images have loaded.
+            function paginate() {
+                const doc = document.getElementById('document');
+                const pages = doc ? Array.from(doc.querySelectorAll(':scope > .docx-page')) : [];
+                if (pages.length === 0) {
+                    return;
+                }
+                doc.querySelectorAll('.cm-card').forEach(c => c.remove());   // placed again after
+                const first = pages[0];
+                for (let i = 1; i < pages.length; i++) {          // gather everything back
+                    while (pages[i].firstChild) {
+                        first.appendChild(pages[i].firstChild);
+                    }
+                    pages[i].remove();
+                }
+                first.querySelectorAll(':scope > [data-cont]').forEach(c => {   // re-join split paragraphs
+                    const head = c.previousElementSibling;
+                    if (head) {
+                        while (c.firstChild) {
+                            head.appendChild(c.firstChild);
+                        }
+                        head.style.marginBottom = '';
+                        head.normalize();
+                        c.remove();
+                    }
+                });
+                const cs = getComputedStyle(first);
+                const padTop = parseFloat(cs.paddingTop), padBottom = parseFloat(cs.paddingBottom);
+                const avail = parseFloat(cs.minHeight) - padTop - padBottom;
+                if (!(avail > 0)) {
+                    return;
+                }
+                // Page breaks: Word's own (saved with its last layout) when the document has
+                // them, then no measuring at all; otherwise manual breaks plus measuring.
+                const wordBreaks = !!first.querySelector('.pb[data-k="r"]');
+                const breakSel = wordBreaks ? '.pb[data-k="r"]' : '.pb[data-k="h"]';
+                const queue = Array.from(first.childNodes);
+                queue.forEach(n => n.remove());
+                let page = first;
+                const newPage = () => {
+                    const next = document.createElement('div');
+                    next.className = 'docx-page';
+                    page.after(next);
+                    page = next;
+                };
+                const bottom = el => el.offsetTop + el.offsetHeight - padTop;
+                while (queue.length) {
+                    const n = queue.shift();
+                    page.appendChild(n);
+                    if (n.nodeType !== 1) {
+                        continue;
+                    }
+                    const brk = n.tagName === 'TABLE' ? null : breakAtMarker(n, breakSel, page);
+                    if (brk === 'before') {                       // break before this block
+                        n.remove();
+                        newPage();
+                        queue.unshift(n);
+                        continue;
+                    }
+                    if (brk) {                                    // break inside: first part stays
+                        page.insertBefore(brk, n);
+                        n.remove();
+                        n.setAttribute('data-cont', '1');
+                        n.style.marginTop = '0';
+                        brk.style.marginBottom = '0';
+                        newPage();
+                        queue.unshift(n);
+                        continue;
+                    }
+                    if (wordBreaks || bottom(n) <= avail) {
+                        continue;
+                    }
+                    const head = n.tagName === 'P' ? splitParagraph(n, page, padTop + avail) : null;
+                    if (head) {                                   // first lines stay, rest goes on
+                        page.insertBefore(head, n);
+                        n.remove();
+                        n.setAttribute('data-cont', '1');
+                        n.style.marginTop = '0';
+                        head.style.marginBottom = '0';
+                        newPage();
+                        queue.unshift(n);
+                    } else if (page.childElementCount > 1) {      // move the whole block
+                        n.remove();
+                        newPage();
+                        queue.unshift(n);
+                    }
+                }
+            }
+
+            // First page-break marker in block n with content before it: returns that content
+            // as a new element (the rest stays in n), 'before' when the marker is at the start
+            // of n and n is not the first block of the page, or null. Markers at the very start
+            // of a page are already satisfied; markers inside tables are ignored.
+            function breakAtMarker(n, sel, page) {
+                for (const m of n.querySelectorAll(sel)) {
+                    if (m.closest('table')) {
+                        continue;
+                    }
+                    const r = document.createRange();
+                    r.setStart(n, 0);
+                    r.setEndBefore(m);
+                    const frag = r.cloneContents();
+                    if (frag.textContent.trim() !== '' || frag.querySelector('img,math')) {
+                        const head = n.cloneNode(false);
+                        head.removeAttribute('id');
+                        head.appendChild(r.extractContents());
+                        return head;
+                    }
+                    if (page.childElementCount > 1) {
+                        return 'before';
+                    }
+                }
+                return null;
+            }
+
+            // Split paragraph p (on page) before the first line that ends below y = limit (page
+            // coordinates, unscaled). Returns the first part as a new element and leaves the rest
+            // in p, or null when not even the first line fits. Equations are never split.
+            function splitParagraph(p, page, limit) {
+                const pr = page.getBoundingClientRect();
+                const scale = pr.height / page.offsetHeight || 1;   // zoom (CSS transform)
+                const limitY = pr.top + limit * scale;
+                const walker = document.createTreeWalker(p, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+                    acceptNode: n => n.nodeType === 1
+                        ? (n.localName === 'math' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP)
+                        : NodeFilter.FILTER_ACCEPT
+                });
+                const range = document.createRange();
+                const charBottom = (t, i) => {
+                    range.setStart(t, i);
+                    range.setEnd(t, i + 1);
+                    const r = range.getClientRects();
+                    return r.length ? r[r.length - 1].bottom : -Infinity;   // collapsed space: no rect
+                };
+                let node, at = -1;
+                while ((node = walker.nextNode())) {
+                    const len = node.data.length;
+                    if (len === 0 || charBottom(node, len - 1) <= limitY && !/\\s$/.test(node.data)) {
+                        continue;                                 // whole text node fits
+                    }
+                    let lo = 0, hi = len;                         // first char below the limit
+                    while (lo < hi) {
+                        const mid = (lo + hi) >> 1;
+                        if (charBottom(node, mid) > limitY) { hi = mid; } else { lo = mid + 1; }
+                    }
+                    if (lo < len) {
+                        at = lo;
+                        break;
+                    }
+                }
+                if (at < 0 || !node) {
+                    return null;
+                }
+                while (at > 0 && !/\\s/.test(node.data[at - 1])) {   // back to the start of the word
+                    at--;
+                }
+                const cut = document.createRange();
+                cut.setStart(p, 0);
+                cut.setEnd(node, at);
+                if (cut.toString().trim() === '') {
+                    return null;                                  // first line does not fit
+                }
+                const head = p.cloneNode(false);
+                head.removeAttribute('id');
+                head.appendChild(cut.extractContents());
+                return head;
+            }
+            // Word comments (JSON from DocxHandler, anchors <span class="cm-s|cm-e|cm-r">):
+            // the commented text is highlighted (CSS Custom Highlight API, no DOM change) and
+            // each comment, with its replies, is a card beside its line in the column right of
+            // the page; cards on a page are stacked so they do not overlap. Click a card to
+            // emphasise its text.
+            let commentRanges = {};
+            function renderComments() {
+                const doc = document.getElementById('document');
+                const dataEl = document.getElementById('docx-comments');
+                if (!doc || !dataEl) {
+                    return;
+                }
+                doc.querySelectorAll('.cm-card').forEach(c => c.remove());
+                let list = [];
+                try {
+                    list = JSON.parse(dataEl.textContent || '[]');
+                } catch (e) {
+                    return;
+                }
+                if (!list.length) {
+                    return;
+                }
+                doc.classList.add('has-comments');
+                const byId = {};
+                list.forEach(c => { byId[c.id] = c; c.replies = []; });
+                list.forEach(c => { if (c.parent && byId[c.parent]) { byId[c.parent].replies.push(c); } });
+                const fmt = d => {
+                    const t = d ? new Date(d) : null;
+                    return t && !isNaN(t) ? t.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+                };
+                const entry = (c, cls) => {
+                    const box = document.createElement('div');
+                    box.className = cls;
+                    const head = document.createElement('div');
+                    head.className = 'cm-head';
+                    head.textContent = c.author || c.initials || 'Comment';
+                    const date = document.createElement('span');
+                    date.className = 'cm-date';
+                    date.textContent = fmt(c.date);
+                    head.appendChild(date);
+                    if (c.done && cls === 'cm-main') {
+                        const tag = document.createElement('span');
+                        tag.className = 'cm-tag';
+                        tag.textContent = 'Resolved';
+                        head.appendChild(tag);
+                    }
+                    box.appendChild(head);
+                    (c.paras || []).forEach(t => {
+                        const p = document.createElement('p');
+                        p.textContent = t;
+                        box.appendChild(p);
+                    });
+                    return box;
+                };
+                const sel = (cls, id) => doc.querySelector('.' + cls + '[data-cid="' + id + '"]');
+                const placed = [];
+                const all = [];
+                commentRanges = {};
+                list.forEach(c => {
+                    if (c.parent && byId[c.parent]) {
+                        return;                                   // shown inside its parent's card
+                    }
+                    const s = sel('cm-s', c.id), e = sel('cm-e', c.id), r = sel('cm-r', c.id);
+                    const anchor = s || r || e;
+                    const page = anchor ? anchor.closest('.docx-page') : null;
+                    if (!page) {
+                        return;
+                    }
+                    if (s && e) {
+                        try {
+                            const range = document.createRange();
+                            range.setStartAfter(s);
+                            range.setEndBefore(e);
+                            if (!range.collapsed) {
+                                commentRanges[c.id] = range;
+                                if (!c.done) {
+                                    all.push(range);              // resolved: highlighted only when clicked
+                                }
+                            }
+                        } catch (err) { /* malformed range: card only */ }
+                    }
+                    const card = document.createElement('div');
+                    card.className = 'cm-card' + (c.done ? ' done' : '');
+                    card.dataset.cid = c.id;
+                    card.appendChild(entry(c, 'cm-main'));
+                    c.replies.forEach(rep => card.appendChild(entry(rep, 'cm-reply')));
+                    card.addEventListener('click', () => activateComment(c.id));
+                    const pr = page.getBoundingClientRect();
+                    const scale = pr.height / page.offsetHeight || 1;
+                    // y in document coordinates (all pages share #document as offset parent)
+                    placed.push({ card, page, y: page.offsetTop + (anchor.getBoundingClientRect().top - pr.top) / scale });
+                    page.appendChild(card);
+                });
+                if (typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined') {
+                    CSS.highlights.set('docx-comment', new Highlight(...all));
+                }
+                commentCards = placed.sort((a, b) => a.y - b.y);
+                stackComments();
+            }
+            // Cards top to bottom through the whole document, each at its line or just below
+            // the card before it (cards may run past the end of their page).
+            let commentCards = [];
+            function stackComments() {
+                let lastBottom = -Infinity;
+                commentCards.forEach(({ card, page, y }) => {
+                    const top = Math.max(y, lastBottom + 6);
+                    card.style.top = (top - page.offsetTop) + 'px';
+                    lastBottom = top + card.offsetHeight;
+                });
+            }
+            function activateComment(id) {
+                document.querySelectorAll('.cm-card.active').forEach(c => c.classList.remove('active'));
+                const card = document.querySelector('.cm-card[data-cid="' + id + '"]');
+                if (card) {
+                    card.classList.add('active');                 // resolved cards open up
+                }
+                stackComments();
+                if (typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined') {
+                    const r = commentRanges[id];
+                    if (r) {
+                        CSS.highlights.set('docx-comment-active', new Highlight(r));
+                    } else {
+                        CSS.highlights.delete('docx-comment-active');
+                    }
+                }
+            }
+            function layout() {
+                paginate();
+                renderComments();
+            }
+            // Tracked changes: markup (insertions green, deletions struck red) or final text.
+            const markupBtn = document.getElementById('toggleMarkup');
+            if (markupBtn) {
+                if (!document.querySelector('#document .tc')) {
+                    markupBtn.style.display = 'none';             // no tracked changes
+                }
+                markupBtn.addEventListener('click', () => {
+                    const doc = document.getElementById('document');
+                    const final = doc.classList.toggle('tc-final');
+                    markupBtn.title = final ? 'Tracked changes: showing final text (click for markup)'
+                        : 'Tracked changes: showing markup (click for final)';
+                    markupBtn.textContent = final ? '✓' : '±';
+                    layout();                                     // heights changed
+                });
+            }
+            layout();
+            window.addEventListener('load', layout);
             
             function updateThemeButton() {
                 const button = document.getElementById('themeToggle');

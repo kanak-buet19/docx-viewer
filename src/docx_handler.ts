@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { prepareDocx, finishHtml, Prepared } from './prepare';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,11 +62,21 @@ export class DocxHandler {
                 }
             }
 
+            // mammoth drops equations and comment anchors and knows nothing about the page:
+            // prepare the document first, complete the HTML after (prepare.ts)
+            let prepared: Prepared = { buffer, equations: [], comments: [], changes: [], page: null };
+            try {
+                prepared = await prepareDocx(buffer);
+                console.log('DocxHandler: Equations:', prepared.equations.length, 'Comments:', prepared.comments.length);
+            } catch (prepError) {
+                console.error('DocxHandler: Preparation failed, rendering the plain document:', prepError);
+            }
+
             // Try to convert - let mammoth handle validation
             console.log('DocxHandler: Converting with mammoth');
-            const result = await mammoth.convertToHtml({ buffer: buffer });
+            const result = await mammoth.convertToHtml({ buffer: prepared.buffer });
             console.log('DocxHandler: Conversion successful, HTML length:', result.value?.length || 0);
-            return result.value ?? ''; // The generated HTML
+            return finishHtml(result.value ?? '', prepared); // The generated HTML
         } catch (error) {
             console.error('DocxHandler: Error converting DOCX:', error);
             console.error('DocxHandler: URI was:', uri.toString());
