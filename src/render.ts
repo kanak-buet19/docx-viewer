@@ -180,7 +180,7 @@ export class DocumentRenderer {
         let headingCounter = 0;
 
         // Process HTML and extract outline in a single pass to ensure matching IDs
-        const processedHtml = html.replace(/<(h[1-6])[^>]*>(.*?)<\/h[1-6]>/gi, (match, tag, content) => {
+        const processedHtml = html.replace(/<(h[1-6])([^>]*)>(.*?)<\/h[1-6]>/gi, (match, tag, attrs, content) => {
             const level = parseInt(tag.charAt(1));
             const text = content.replace(/<[^>]*>/g, '').trim();
             const id = this.generateHeadingId(text, headingCounter++);
@@ -193,7 +193,8 @@ export class DocumentRenderer {
                 });
             }
 
-            return `<${tag} id="${id}">${content}</${tag}>`;
+            const kept = String(attrs).replace(/\sid="[^"]*"/, '');   // keep style etc.
+            return `<${tag}${kept} id="${id}">${content}</${tag}>`;
         });
 
         return { html: processedHtml, outline };
@@ -1071,23 +1072,50 @@ export class DocumentRenderer {
                     { cls: ['tc-final'], icon: '✓', title: 'Final: final text with comments (click: clean)' },
                     { cls: ['tc-final', 'no-comments'], icon: '◻', title: 'Clean: final text only (click: markup)' },
                 ];
-                let view = 0;
-                if (!document.querySelector('#document .tc') && !document.getElementById('docx-comments')) {
-                    markupBtn.style.display = 'none';             // nothing to show or hide
-                }
-                markupBtn.title = views[0].title;
-                markupBtn.addEventListener('click', () => {
+                const applyView = () => {
                     const doc = document.getElementById('document');
-                    view = (view + 1) % views.length;
                     doc.classList.remove('tc-final', 'no-comments');
                     views[view].cls.forEach(c => doc.classList.add(c));
                     markupBtn.textContent = views[view].icon;
                     markupBtn.title = views[view].title;
+                };
+                let view = ((vscode.getState() || {}).view || 0) % views.length;   // kept over reloads
+                if (!document.querySelector('#document .tc') && !document.getElementById('docx-comments')) {
+                    markupBtn.style.display = 'none';             // nothing to show or hide
+                }
+                applyView();
+                markupBtn.addEventListener('click', () => {
+                    view = (view + 1) % views.length;
+                    applyView();
+                    vscode.setState(Object.assign(vscode.getState() || {}, { view: view }));
                     layout();                                     // heights changed
                 });
             }
+            // Scroll position kept in the webview state, so a reload (file changed on disk)
+            // returns to the same place.
+            const scroller = document.getElementById('documentContent');
+            function restoreScroll() {
+                const st = vscode.getState();
+                if (scroller && st && st.scrollTop) {
+                    scroller.scrollTop = st.scrollTop;
+                }
+            }
+            let scrollPending = false;
+            if (scroller) {
+                scroller.addEventListener('scroll', () => {
+                    if (scrollPending) {
+                        return;
+                    }
+                    scrollPending = true;
+                    requestAnimationFrame(() => {
+                        scrollPending = false;
+                        vscode.setState(Object.assign(vscode.getState() || {}, { scrollTop: scroller.scrollTop }));
+                    });
+                }, { passive: true });
+            }
             layout();
-            window.addEventListener('load', layout);
+            restoreScroll();
+            window.addEventListener('load', () => { layout(); restoreScroll(); });
             
             function updateThemeButton() {
                 const button = document.getElementById('themeToggle');

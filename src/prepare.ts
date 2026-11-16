@@ -11,6 +11,7 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { replaceEquations, insertEquations } from './omml';
 import { markComments, insertCommentAnchors, CommentData } from './comments';
 import { markChanges, insertChanges, ChangeData } from './trackchanges';
+import { markParagraphs, insertParagraphStyles, ParagraphData } from './paragraphs';
 
 export const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
 export const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -61,6 +62,7 @@ export interface Prepared {
     equations: string[];             // MathML, by placeholder index
     comments: CommentData[];
     changes: ChangeData[];           // tracked changes, by placeholder index
+    paragraphs: ParagraphData | null; // paragraph formats, by placeholder index
     page: PageSize | null;
 }
 
@@ -68,16 +70,13 @@ export async function prepareDocx(buffer: Buffer): Promise<Prepared> {
     const zip = await JSZip.loadAsync(buffer);
     const part = zip.file('word/document.xml');
     if (!part) {
-        return { buffer, equations: [], comments: [], changes: [], page: null };
+        return { buffer, equations: [], comments: [], changes: [], paragraphs: null, page: null };
     }
     const xml = await part.async('string');
     const page = pageSize(xml);
     const hasMath = xml.indexOf(M_NS) >= 0;
     const hasComments = xml.indexOf('commentRangeStart') >= 0 || xml.indexOf('commentReference') >= 0;
     const hasMarks = /<w:(ins|del|moveTo|moveFrom|lastRenderedPageBreak)\b|<w:br [^>]*w:type="page"/.test(xml);
-    if (!hasMath && !hasComments && !hasMarks) {
-        return { buffer, equations: [], comments: [], changes: [], page };   // leave the file untouched
-    }
 
     const doc = parseXml(xml);
     let equations: string[] = [];
@@ -98,15 +97,24 @@ export async function prepareDocx(buffer: Buffer): Promise<Prepared> {
     } catch (e) {
         console.error('prepare: comments skipped:', e);
     }
+    let paragraphs: ParagraphData | null = null;
+    try {                                                   // last: its marker must come first
+        paragraphs = markParagraphs(doc, await zip.file('word/styles.xml')?.async('string'));
+    } catch (e) {
+        console.error('prepare: paragraph formats skipped:', e);
+    }
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc as any));
     const out = await zip.generateAsync({ type: 'nodebuffer' });
-    return { buffer: out, equations, comments, changes, page };
+    return { buffer: out, equations, comments, changes, paragraphs, page };
 }
 
 /** mammoth's HTML -> final HTML: MathML and comment anchors in place, the comments as JSON
  *  for the viewer script, and the page size as CSS; wrapped in one .docx-page, which the
  *  viewer script splits into pages. */
 export function finishHtml(html: string, p: Prepared): string {
+    if (p.paragraphs) {
+        html = insertParagraphStyles(html, p.paragraphs);   // first: markers sit right after the tag
+    }
     html = insertChanges(insertCommentAnchors(insertEquations(html, p.equations)), p.changes);
     let out = '';
     if (p.comments.length) {
@@ -116,7 +124,7 @@ export function finishHtml(html: string, p: Prepared): string {
     if (!p.page) {
         return out + html;
     }
-    return out + pageCss(p.page) + '<div class="docx-page">' + html + '</div>';
+    return out + pageCss(p.page, p.paragraphs?.font ?? null) + '<div class="docx-page">' + html + '</div>';
 }
 
 function pageSize(xml: string): PageSize {
@@ -134,9 +142,12 @@ function pageSize(xml: string): PageSize {
 
 /** Fixed page width (lines wrap as on the printed page, not with the window), page boxes,
  *  and the comment cards in a column to the right of the pages. */
-function pageCss(g: PageSize): string {
+function pageCss(g: PageSize, font: string | null): string {
     const cm = 3.4;                  // comment column, in
+    const family = font ? `font-family: "${font.replace(/["<>]/g, '')}", serif;` : '';
     return `<style>
+    .docx-page { ${family} font-size: 10pt; }
+    .docx-page h1, .docx-page h2, .docx-page h3, .docx-page h4, .docx-page h5, .docx-page h6 { color: inherit; }
     #document.docx-document { width: ${g.w}in; min-width: ${g.w}in; max-width: none; padding: 0;
         background: transparent !important; box-shadow: none; border-radius: 0; }
     #document.docx-document.has-comments { width: ${g.w + cm}in; min-width: ${g.w + cm}in; }

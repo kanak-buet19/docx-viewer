@@ -102,6 +102,37 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
         // Check if we need to show diffs (more than 1 panel for same file)
         if (panels.length >= 2) {
             this.triggerDiffUpdate(fsPath);
+        } else if (document.uri.scheme === 'file') {
+            // Re-render when the file changes on disk (saved from Word, synced by OneDrive).
+            // Debounced: a save or sync can fire several events and write in several steps.
+            const nodePath = require('path');
+            const watcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(vscode.Uri.file(nodePath.dirname(fsPath)), nodePath.basename(fsPath)));
+            let timer: NodeJS.Timeout | undefined;
+            const reload = () => {
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                timer = setTimeout(async () => {
+                    if (!this.activeWebviewPanels.has(uriString)) {
+                        return;
+                    }
+                    const st = this.getOrCreateState(uriString);
+                    await DocumentRenderer.renderDocument(document.uri, webviewPanel, {
+                        zoom: st.zoom,
+                        outlineVisible: st.outlineVisible,
+                        toolbarVisible: st.toolbarVisible
+                    });
+                }, 1500);
+            };
+            watcher.onDidChange(reload);
+            watcher.onDidCreate(reload);
+            webviewPanel.onDidDispose(() => {
+                watcher.dispose();
+                if (timer) {
+                    clearTimeout(timer);
+                }
+            });
         }
     }
 

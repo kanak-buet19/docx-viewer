@@ -64,7 +64,7 @@ export class DocxHandler {
 
             // mammoth drops equations and comment anchors and knows nothing about the page:
             // prepare the document first, complete the HTML after (prepare.ts)
-            let prepared: Prepared = { buffer, equations: [], comments: [], changes: [], page: null };
+            let prepared: Prepared = { buffer, equations: [], comments: [], changes: [], paragraphs: null, page: null };
             try {
                 prepared = await prepareDocx(buffer);
                 console.log('DocxHandler: Equations:', prepared.equations.length, 'Comments:', prepared.comments.length);
