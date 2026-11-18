@@ -12,11 +12,44 @@
 
 A modern, feature-rich document viewer for Microsoft Word (.docx) and OpenDocument Text (.odt) files in Visual Studio Code.
 
-> **About this fork.** This is a fork of [Docx/ODT Viewer](https://github.com/skfrost19/Docx-Viewer) by **Shahil Kumar** ([@skfrost19](https://github.com/skfrost19)), released under the MIT License. All credit for the original extension goes to him; the badges below refer to the original project.
->
-> Added in this fork: Word-style page layout, equations, comments and tracked changes (markup / final / clean views), paragraph and run formatting from Word styles, auto-reload when the file changes on disk, a light/dark toggle (light by default) and a redesigned toolbar. See [CHANGELOG.md](CHANGELOG.md).
->
-> **Install from source:** `npm install && npm run compile && npx @vscode/vsce package`, then `code --install-extension docxreader-<version>.vsix`.
+> **About this fork.** This is a fork of [Docx/ODT Viewer](https://github.com/skfrost19/Docx-Viewer) by **Shahil Kumar** ([@skfrost19](https://github.com/skfrost19)), released under the MIT License. All credit for the original extension goes to him; the badges above refer to the original project. The changes made in this fork are listed below.
+
+## 🆕 What's new in this fork
+
+Changes relative to the original extension (v1.4.3):
+
+### Word-accurate layout
+- **Real pages** - the page width, height and margins come from the document itself; the text is split into pages as in Word (a paragraph that does not fit continues on the next page), Word's own and manual page breaks are honoured, and pages are numbered
+- **Paragraph formatting from Word styles** - alignment, spacing before/after, line spacing, indents, font size, bold and italic are resolved per paragraph from direct formatting, the style chain and the document defaults; the document's own font is used
+- **Character formatting** - text colour, highlight, shading, size, font, underline, small/all caps, hidden text and character-style bold/italic
+- **Word spacing model** - space before/after added the way Word does (no CSS margin collapse), "don't add space between paragraphs of the same style" respected, and line height taken from the font itself instead of a fixed 1.15
+
+### Equations
+- **Word equations (OMML)** are converted to MathML and rendered natively, both inline and as display equations
+
+### Comments and tracked changes
+- **Comments** shown as cards beside the text, with replies and resolved state; the commented text is highlighted
+- **Tracked changes** shown as insertions and deletions, including nested changes and images inside a change
+- **Three views**, switched with one button: *Markup* (changes and comments), *Final* (final text with comments) and *Clean* (final text only)
+
+### Live reload
+- **The document re-renders when the file changes on disk** (saved from Word, synced by OneDrive/iCloud); the scroll position and the chosen view are kept. Because cloud folders do not always report changes, the file size and time are also checked every 2 s
+
+### Look and controls
+- **Light/dark toggle** - light mode by default; one click switches between light and dark, and the choice is kept across reloads (`docxreader.theme` still accepts `auto` to follow VS Code)
+- **Redesigned toolbar** - a single floating bar with line icons instead of emoji, grouped as outline | zoom | find, view, theme | collapse, shown by default; it collapses into a small pill with the theme switch
+- **Find panel** restyled to match the toolbar
+
+### Install this fork
+This fork is not on the VS Code Marketplace. Build and install it from source:
+
+```bash
+git clone https://github.com/kanak-buet19/docx-viewer.git
+cd docx-viewer
+npm install && npm run compile
+npx @vscode/vsce package
+code --install-extension docxreader-<version>.vsix
+```
 
 ## ✨ Features
 

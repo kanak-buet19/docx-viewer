@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Fork of the original extension by Shahil Kumar; see "What's new in this fork" in the README.
+
+### Added
+- **Pages** - Page size and margins from the document, text split into pages as in Word, page breaks honoured, page numbers
+- **Word Formatting** - Paragraph and character formatting resolved from Word styles; Word spacing model and font line height
+- **Equations** - Word equations (OMML) rendered as MathML
+- **Comments** - Comment cards with replies and resolved state; commented text highlighted
+- **Tracked Changes** - Insertions and deletions (nested changes and images included), with Markup / Final / Clean views
+- **Live Reload** - Re-render when the file changes on disk, keeping scroll position and view; size/time polled every 2 s for cloud folders
+
 ### Changed
 - **Light Theme by Default** - `docxreader.theme` now defaults to `light`; set it to `auto` to follow the VS Code theme
 - **Light/Dark Toggle** - The theme button switches between light and dark (no longer cycles through auto). It is also shown in the collapsed mini-toolbar next to ⚙️, and the "Toggle Theme" command does the same
