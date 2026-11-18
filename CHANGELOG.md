@@ -5,6 +5,17 @@ All notable changes to the "Enhanced Docx/ODT Viewer" extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Light Theme by Default** - `docxreader.theme` now defaults to `light`; set it to `auto` to follow the VS Code theme
+- **Light/Dark Toggle** - The theme button switches between light and dark (no longer cycles through auto). It is also shown in the collapsed mini-toolbar next to ⚙️, and the "Toggle Theme" command does the same
+- **Redesigned Toolbar** - One floating bar with line icons (no emoji), grouped as outline | zoom | find, markup, theme | collapse, with a tooltip on every button. The toolbar is shown by default; the collapse button folds it into a small theme + expand pill
+- **Find Panel** - Restyled to match the toolbar (search icon, borderless input, arrow buttons)
+- **Theme Kept on Reload** - The chosen theme now survives the auto-reload after the file changes on disk
+
+---
+
 ## [1.4.3] - 2026-08-16
 
 ### 🔒 Security & Search Improvements

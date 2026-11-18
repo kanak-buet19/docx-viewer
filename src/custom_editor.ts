@@ -27,8 +27,8 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
             this.documentStates.set(uriString, {
                 zoom: config.get<number>('zoomLevel', 1.0),
                 outlineVisible: config.get<boolean>('showOutline', true),
-                currentTheme: config.get<string>('theme', 'auto'),
-                toolbarVisible: false
+                currentTheme: config.get<string>('theme', 'light'),
+                toolbarVisible: true
             });
         }
         return this.documentStates.get(uriString)!;
@@ -96,7 +96,8 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
         await DocumentRenderer.renderDocument(document.uri, webviewPanel, {
             zoom: state.zoom,
             outlineVisible: state.outlineVisible,
-            toolbarVisible: state.toolbarVisible
+            toolbarVisible: state.toolbarVisible,
+            theme: state.currentTheme
         });
 
         // Check if we need to show diffs (more than 1 panel for same file)
@@ -121,7 +122,8 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
                     await DocumentRenderer.renderDocument(document.uri, webviewPanel, {
                         zoom: st.zoom,
                         outlineVisible: st.outlineVisible,
-                        toolbarVisible: st.toolbarVisible
+                        toolbarVisible: st.toolbarVisible,
+                        theme: st.currentTheme
                     });
                 }, 1500);
             };
@@ -373,10 +375,14 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
         const panel = webviewPanel || this.getActiveWebviewPanel();
         const state = panel ? this.getStateForPanel(panel) : undefined;
         if (state) {
-            // Cycle through themes: auto -> light -> dark -> auto
-            if (state.currentTheme === 'auto') { state.currentTheme = 'light'; }
-            else if (state.currentTheme === 'light') { state.currentTheme = 'dark'; }
-            else { state.currentTheme = 'auto'; }
+            // Switch between light and dark. 'auto' switches to the opposite of the
+            // current VS Code theme, so the click always changes what is shown.
+            let shown = state.currentTheme;
+            if (shown === 'auto') {
+                const kind = vscode.window.activeColorTheme.kind;
+                shown = (kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast) ? 'dark' : 'light';
+            }
+            state.currentTheme = shown === 'dark' ? 'light' : 'dark';
             await this.sendThemeUpdate(panel, state.currentTheme);
         }
     }

@@ -6,7 +6,7 @@
   "icon": "assets/icons/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/skfrost19/Docx-Viewer.git"
+    "url": "https://github.com/kanak-buet19/docx-viewer.git"
   },
   "version": "1.4.3",
   "engines": {
@@ -28,13 +28,13 @@
         },
         "docxreader.theme": {
           "type": "string",
-          "default": "auto",
+          "default": "light",
           "enum": [
             "auto",
             "light",
             "dark"
           ],
-          "description": "Theme for document viewer (config takes precedence over system theme). 'auto' follows VS Code theme, 'light' always uses light mode, 'dark' always uses dark mode."
+          "description": "Starting theme for the document viewer. 'light' (default) always uses light mode, 'dark' always uses dark mode, 'auto' follows the VS Code theme. The ☀️/🌙 button in the viewer switches between light and dark for the open document."
         },
         "docxreader.zoomLevel": {
           "type": "number",

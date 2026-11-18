@@ -12,6 +12,12 @@
 
 A modern, feature-rich document viewer for Microsoft Word (.docx) and OpenDocument Text (.odt) files in Visual Studio Code.
 
+> **About this fork.** This is a fork of [Docx/ODT Viewer](https://github.com/skfrost19/Docx-Viewer) by **Shahil Kumar** ([@skfrost19](https://github.com/skfrost19)), released under the MIT License. All credit for the original extension goes to him; the badges below refer to the original project.
+>
+> Added in this fork: Word-style page layout, equations, comments and tracked changes (markup / final / clean views), paragraph and run formatting from Word styles, auto-reload when the file changes on disk, a light/dark toggle (light by default) and a redesigned toolbar. See [CHANGELOG.md](CHANGELOG.md).
+>
+> **Install from source:** `npm install && npm run compile && npx @vscode/vsce package`, then `code --install-extension docxreader-<version>.vsix`.
+
 ## ✨ Features
 
 ### 📄 Document Support
@@ -62,7 +68,7 @@ Access settings via `Ctrl+Shift+P` → "Open Docx Reader Configuration" or go to
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `docxreader.font` | Font family for document rendering | `Arial` |
-| `docxreader.theme` | Theme preference (auto/light/dark). Auto mode detects VS Code theme automatically | `auto` |
+| `docxreader.theme` | Starting theme (light/dark/auto). Auto follows the VS Code theme. The ☀️/🌙 button in the viewer switches between light and dark | `light` |
 | `docxreader.zoomLevel` | Default zoom level (0.5 - 3.0) | `1.0` |
 | `docxreader.showOutline` | Show document outline by default | `true` |
 
@@ -70,7 +76,7 @@ Access settings via `Ctrl+Shift+P` → "Open Docx Reader Configuration" or go to
 ```json
 {
     "docxreader.font": "Georgia",
-    "docxreader.theme": "auto",
+    "docxreader.theme": "light",
     "docxreader.zoomLevel": 1.2,
     "docxreader.showOutline": true
 }

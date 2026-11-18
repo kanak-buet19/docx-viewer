@@ -6,10 +6,33 @@ import { OdtHandler } from './odt_handler';
 export class DocumentRenderer {
     private static currentZoom: number = 1.0;
     private static outlineVisible: boolean = true;
-    private static currentTheme: string = 'auto';
-    private static toolbarVisible: boolean = false;
+    private static currentTheme: string = 'light';
+    private static toolbarVisible: boolean = true;
 
-    public static async renderDocument(uri: vscode.Uri, panel: vscode.WebviewPanel, initialState?: { zoom?: number; outlineVisible?: boolean; toolbarVisible?: boolean }) {
+    // Line icons for the toolbar (24x24 grid, stroke in the current text colour)
+    private static readonly ICONS: { [name: string]: string } = (() => {
+        const svg = (body: string) =>
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + body + '</svg>';
+        return {
+            sidebar: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
+            zoomOut: svg('<path d="M5 12h14"/>'),
+            zoomIn: svg('<path d="M5 12h14"/><path d="M12 5v14"/>'),
+            fit: svg('<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>'),
+            search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+            markup: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+            final: svg('<path d="M20 6 9 17l-5-5"/>'),
+            clean: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
+            sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/>'),
+            moon: svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
+            up: svg('<path d="m18 15-6-6-6 6"/>'),
+            down: svg('<path d="m6 9 6 6 6-6"/>'),
+            close: svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+            collapse: svg('<path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/>'),
+            expand: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
+        };
+    })();
+
+    public static async renderDocument(uri: vscode.Uri, panel: vscode.WebviewPanel, initialState?: { zoom?: number; outlineVisible?: boolean; toolbarVisible?: boolean; theme?: string }) {
         const docxPath = uri.fsPath;
         try {
             // Show loading state
@@ -22,13 +45,14 @@ export class DocumentRenderer {
             // - 'dark': always use dark theme (ignore system theme)
             const config = vscode.workspace.getConfiguration('docxreader');
             const font = config.get('font', 'Arial');
-            const theme = config.get('theme', 'auto');
             // Use caller-supplied state when provided, otherwise fall back to config defaults.
-            // NOTE: theme always comes from config (config takes precedence over runtime toggle state)
-            // to preserve the fix for #27 / #25.
+            // The theme starts from the config setting (light by default); the per-document
+            // state carries the user's light/dark toggle, so a re-render (e.g. auto-reload
+            // after the file changes) keeps the theme the user picked.
+            const theme = initialState?.theme ?? config.get('theme', 'light');
             this.currentZoom = initialState?.zoom ?? config.get('zoomLevel', 1.0);
             this.outlineVisible = initialState?.outlineVisible ?? config.get('showOutline', true);
-            this.currentTheme = theme; // always config — never initialState.theme
+            this.currentTheme = theme;
             if (initialState?.toolbarVisible !== undefined) {
                 this.toolbarVisible = initialState.toolbarVisible;
             }
@@ -87,36 +111,41 @@ export class DocumentRenderer {
 </head>
 <body class="${themeClass}" style="font-family: ${font};">
     <div class="docx-viewer-container">
-        <!-- Toolbar -->
-        <div class="docx-toolbar ${this.toolbarVisible ? '' : 'hidden'}" id="mainToolbar">
-            <button id="zoomOut" title="Zoom Out">🔍-</button>
-            <span id="zoomLevel">${Math.round(this.currentZoom * 100)}%</span>
-            <button id="zoomIn" title="Zoom In">🔍+</button>
-            <button id="resetZoom" title="Reset Zoom">⚊</button>
-            <button id="toggleOutline" title="Toggle Outline">${this.outlineVisible ? '◧' : '◨'}</button>
-            <button id="themeToggle" title="Toggle Theme">${this.currentTheme === 'dark' ? '☀️' : this.currentTheme === 'light' ? '🌙' : '🔄'}</button>
-            <button id="searchBtn" title="Search">🔍</button>
-            <button id="toggleMarkup" title="Markup: tracked changes and comments (click: final)">±</button>
-            <button id="hideToolbar" title="Hide Toolbar">✕</button>
+        <!-- Toolbar: view | zoom | tools | collapse -->
+        <div class="docx-toolbar ${this.toolbarVisible ? '' : 'hidden'}" id="mainToolbar" role="toolbar" aria-label="Document viewer">
+            <button id="toggleOutline" class="tb-btn ${this.outlineVisible ? 'active' : ''}" title="Outline" aria-label="Toggle outline">${DocumentRenderer.ICONS.sidebar}</button>
+            <span class="tb-sep"></span>
+            <button id="zoomOut" class="tb-btn" title="Zoom out" aria-label="Zoom out">${DocumentRenderer.ICONS.zoomOut}</button>
+            <span id="zoomLevel" class="tb-zoom" title="Zoom level">${Math.round(this.currentZoom * 100)}%</span>
+            <button id="zoomIn" class="tb-btn" title="Zoom in" aria-label="Zoom in">${DocumentRenderer.ICONS.zoomIn}</button>
+            <button id="resetZoom" class="tb-btn" title="Reset zoom (100%)" aria-label="Reset zoom">${DocumentRenderer.ICONS.fit}</button>
+            <span class="tb-sep"></span>
+            <button id="searchBtn" class="tb-btn" title="Find (Ctrl/Cmd+F)" aria-label="Find">${DocumentRenderer.ICONS.search}</button>
+            <button id="toggleMarkup" class="tb-btn" title="Markup: tracked changes and comments (click: final)" aria-label="Markup view">${DocumentRenderer.ICONS.markup}</button>
+            <button id="themeToggle" class="tb-btn" title="Toggle light/dark" aria-label="Toggle light or dark mode">${DocumentRenderer.ICONS.moon}</button>
+            <span class="tb-sep"></span>
+            <button id="hideToolbar" class="tb-btn" title="Collapse toolbar" aria-label="Collapse toolbar">${DocumentRenderer.ICONS.collapse}</button>
         </div>
-        
-        <!-- Mini Toolbar Toggle (visible when main toolbar is hidden) -->
+
+        <!-- Collapsed toolbar -->
         <div class="docx-mini-toolbar ${this.toolbarVisible ? 'hidden' : ''}" id="miniToolbar">
-            <button id="showToolbar" title="Show Toolbar">⚙️</button>
+            <button id="themeToggleMini" class="tb-btn" title="Toggle light/dark" aria-label="Toggle light or dark mode">${DocumentRenderer.ICONS.moon}</button>
+            <button id="showToolbar" class="tb-btn" title="Show toolbar" aria-label="Show toolbar">${DocumentRenderer.ICONS.expand}</button>
         </div>
-        
+
         <!-- Search Panel -->
         <div class="docx-search" id="searchPanel">
-            <input type="text" id="searchInput" placeholder="Search in document...">
+            <span class="search-icon">${DocumentRenderer.ICONS.search}</span>
+            <input type="text" id="searchInput" placeholder="Find in document" aria-label="Find in document">
             <span id="searchCount" class="search-count">0/0</span>
-            <button id="searchPrev" title="Previous">↑</button>
-            <button id="searchNext" title="Next">↓</button>
-            <button id="closeSearch" title="Close">✕</button>
+            <button id="searchPrev" class="tb-btn" title="Previous match" aria-label="Previous match">${DocumentRenderer.ICONS.up}</button>
+            <button id="searchNext" class="tb-btn" title="Next match" aria-label="Next match">${DocumentRenderer.ICONS.down}</button>
+            <button id="closeSearch" class="tb-btn" title="Close" aria-label="Close search">${DocumentRenderer.ICONS.close}</button>
         </div>
-        
+
         <!-- Outline Panel -->
         <div class="docx-outline ${this.outlineVisible ? '' : 'hidden'}" id="outlinePanel">
-            <h3>📋 Document Outline</h3>
+            <h3>Outline</h3>
             ${outlineHtml}
         </div>
         
@@ -346,81 +375,66 @@ export class DocumentRenderer {
             color: var(--viewer-fg);
         }
         
-        .docx-toolbar {
+        /* Toolbar: one floating bar, flat icon buttons, groups split by thin lines */
+        .docx-toolbar, .docx-mini-toolbar, .docx-search {
             position: fixed;
-            top: 0;
-            right: 0;
-            z-index: 1000;
+            right: 12px;
             display: flex;
-            gap: 8px;
-            padding: 8px;
-            background: var(--viewer-bg);
-            border-bottom: 1px solid var(--viewer-border);
-            border-left: 1px solid var(--viewer-border);
-            border-radius: 0 0 0 4px;
-            box-shadow: 0 2px 8px var(--viewer-shadow);
-        }
-        
-        .docx-toolbar button {
-            background: transparent;
-            border: 1px solid var(--viewer-border);
-            color: var(--viewer-fg);
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s ease;
-        }
-        
-        .docx-toolbar button:hover { background: var(--viewer-hover); }
-        .docx-toolbar button:active { background: var(--viewer-active); color: white; }
-        
-        .docx-toolbar.hidden {
-            transform: translateY(-100%);
-            opacity: 0;
-            pointer-events: none;
-        }
-        
-        .docx-mini-toolbar {
-            position: fixed;
-            top: 8px;
-            right: 8px;
-            z-index: 1001;
-            background: var(--viewer-bg);
-            border: 1px solid var(--viewer-border);
-            border-radius: 4px;
+            align-items: center;
+            gap: 2px;
             padding: 4px;
-            box-shadow: 0 2px 8px var(--viewer-shadow);
-            transition: all 0.3s ease;
-        }
-        
-        .docx-mini-toolbar.hidden {
-            opacity: 0;
-            pointer-events: none;
-            transform: scale(0.8);
-        }
-        
-        .docx-mini-toolbar button {
-            background: transparent;
+            background: var(--viewer-bg);
             border: 1px solid var(--viewer-border);
+            border-radius: 10px;
+            box-shadow: 0 4px 16px var(--viewer-shadow), 0 1px 3px var(--viewer-shadow);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+        .docx-toolbar { top: 12px; z-index: 1000; }
+        .docx-mini-toolbar { top: 12px; z-index: 1001; }
+        .docx-toolbar.hidden, .docx-mini-toolbar.hidden {
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+        }
+
+        .tb-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
             color: var(--viewer-fg);
-            padding: 8px;
-            border-radius: 4px;
+            opacity: 0.75;
             cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s ease;
+            transition: background 0.12s ease, opacity 0.12s ease;
         }
-        
-        .docx-mini-toolbar button:hover { background: var(--viewer-hover); }
-        .docx-mini-toolbar button:active { background: var(--viewer-active); color: white; }
-        
-        #zoomLevel {
-            padding: 6px 8px;
-            font-size: 12px;
-            min-width: 45px;
+        .tb-btn:hover { background: var(--viewer-hover); opacity: 1; }
+        .tb-btn:active { transform: scale(0.94); }
+        .tb-btn.active { background: var(--viewer-hover); opacity: 1; color: var(--viewer-active); }
+        .tb-btn:focus-visible { outline: 2px solid var(--viewer-active); outline-offset: 1px; }
+
+        .tb-sep {
+            width: 1px;
+            height: 18px;
+            margin: 0 4px;
+            background: var(--viewer-border);
+        }
+
+        .tb-zoom {
+            min-width: 46px;
             text-align: center;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--viewer-fg);
+            opacity: 0.85;
+            user-select: none;
         }
-        
+
         .docx-outline {
             width: var(--outline-width);
             background: var(--viewer-bg);
@@ -434,8 +448,11 @@ export class DocumentRenderer {
         
         .docx-outline h3 {
             margin: 0 0 12px 0;
-            font-size: 14px;
+            font-size: 11px;
             font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            opacity: 0.6;
             border-bottom: 1px solid var(--viewer-border);
             padding-bottom: 8px;
         }
@@ -514,30 +531,20 @@ export class DocumentRenderer {
         .zoom-200 { transform: scale(2.0); }
         .zoom-300 { transform: scale(3.0); }
         
-        .docx-search {
-            position: fixed;
-            top: 50px;
-            right: 10px;
-            z-index: 999;
-            display: none;
-            background: var(--viewer-bg);
-            border: 1px solid var(--viewer-border);
-            border-radius: 4px;
-            padding: 8px;
-            box-shadow: 0 4px 12px var(--viewer-shadow);
-            gap: 4px;
-        }
-        
+        .docx-search { top: 56px; z-index: 999; display: none; padding: 4px 4px 4px 10px; }
         .docx-search.visible { display: flex; }
-        
+        .search-icon { display: inline-flex; color: var(--viewer-fg); opacity: 0.5; margin-right: 4px; }
+
         .docx-search input {
-            background: var(--viewer-bg);
-            border: 1px solid var(--viewer-border);
+            width: 220px;
+            height: 28px;
+            padding: 0 4px;
+            border: none;
+            outline: none;
+            background: transparent;
             color: var(--viewer-fg);
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            width: 200px;
+            font-size: 13px;
+            font-family: inherit;
         }
 
         .search-count {
@@ -546,22 +553,10 @@ export class DocumentRenderer {
             font-size: 12px;
             font-variant-numeric: tabular-nums;
             color: var(--viewer-fg);
-            opacity: 0.8;
-            padding: 4px 2px;
+            opacity: 0.6;
+            padding: 0 4px;
         }
-        
-        .docx-search button {
-            background: transparent;
-            border: 1px solid var(--viewer-border);
-            color: var(--viewer-fg);
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        
-        .docx-search button:hover { background: var(--viewer-hover); }
-        
+
         .search-highlight {
             background: yellow;
             color: black;
@@ -606,6 +601,7 @@ export class DocumentRenderer {
             let outlineVisible = ${this.outlineVisible};
             let currentTheme = '${this.currentTheme}';
             let toolbarVisible = ${this.toolbarVisible};
+            const ICONS = ${JSON.stringify(DocumentRenderer.ICONS)};
             let searchResults = [];
             let currentSearchIndex = -1;
             let activeSearchElement = null;
@@ -1095,15 +1091,15 @@ export class DocumentRenderer {
             const markupBtn = document.getElementById('toggleMarkup');
             if (markupBtn) {
                 const views = [
-                    { cls: [], icon: '±', title: 'Markup: tracked changes and comments (click: final)' },
-                    { cls: ['tc-final'], icon: '✓', title: 'Final: final text with comments (click: clean)' },
-                    { cls: ['tc-final', 'no-comments'], icon: '◻', title: 'Clean: final text only (click: markup)' },
+                    { cls: [], icon: 'markup', title: 'Markup: tracked changes and comments (click: final)' },
+                    { cls: ['tc-final'], icon: 'final', title: 'Final: final text with comments (click: clean)' },
+                    { cls: ['tc-final', 'no-comments'], icon: 'clean', title: 'Clean: final text only (click: markup)' },
                 ];
                 const applyView = () => {
                     const doc = document.getElementById('document');
                     doc.classList.remove('tc-final', 'no-comments');
                     views[view].cls.forEach(c => doc.classList.add(c));
-                    markupBtn.textContent = views[view].icon;
+                    markupBtn.innerHTML = ICONS[views[view].icon];
                     markupBtn.title = views[view].title;
                 };
                 let view = ((vscode.getState() || {}).view || 0) % views.length;   // kept over reloads
@@ -1144,18 +1140,25 @@ export class DocumentRenderer {
             restoreScroll();
             window.addEventListener('load', () => { layout(); restoreScroll(); });
             
-            function updateThemeButton() {
-                const button = document.getElementById('themeToggle');
+            // Light/dark actually shown: 'auto' resolves to the detected VS Code theme
+            function shownTheme() {
                 if (currentTheme === 'auto') {
-                    button.textContent = '🔄';
-                    button.title = 'Theme: Auto (Click for Dark)';
-                } else if (currentTheme === 'light') {
-                    button.textContent = '🌙';
-                    button.title = 'Theme: Light (Click for Auto)';
-                } else {
-                    button.textContent = '☀️';
-                    button.title = 'Theme: Dark (Click for Light)';
+                    return detectVSCodeTheme() === 'vscode-dark' ? 'dark' : 'light';
                 }
+                return currentTheme;
+            }
+
+            function updateThemeButton() {
+                const dark = shownTheme() === 'dark';
+                const label = (dark ? 'Dark mode' : 'Light mode') + (currentTheme === 'auto' ? ' (auto)' : '') +
+                    ' - click for ' + (dark ? 'light' : 'dark');
+                ['themeToggle', 'themeToggleMini'].forEach(id => {
+                    const button = document.getElementById(id);
+                    if (button) {
+                        button.innerHTML = dark ? ICONS.sun : ICONS.moon;
+                        button.title = label;
+                    }
+                });
             }
             
             // Zoom controls
@@ -1211,7 +1214,7 @@ export class DocumentRenderer {
                 const button = document.getElementById('toggleOutline');
                 
                 outline.classList.toggle('hidden', !outlineVisible);
-                button.textContent = outlineVisible ? '◧' : '◨';
+                button.classList.toggle('active', outlineVisible);
                 
                 // Send message back to extension
                 vscode.postMessage({
@@ -1220,17 +1223,9 @@ export class DocumentRenderer {
                 });
             });
             
-            // Theme toggle
-            document.getElementById('themeToggle').addEventListener('click', () => {
-                if (currentTheme === 'dark') {
-                    currentTheme = 'light';
-                } else if (currentTheme === 'light') {
-                    currentTheme = 'auto';
-                } else {
-                    // If auto, switch to dark
-                    currentTheme = 'dark';
-                }
-                
+            // Theme toggle: switch between light and dark (toolbar and mini-toolbar buttons)
+            function toggleTheme() {
+                currentTheme = shownTheme() === 'dark' ? 'light' : 'dark';
                 updateTheme();
                 
                 // Send message back to extension
@@ -1238,7 +1233,9 @@ export class DocumentRenderer {
                     command: 'themeChanged',
                     theme: currentTheme
                 });
-            });
+            }
+            document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+            document.getElementById('themeToggleMini').addEventListener('click', toggleTheme);
             
             function updateTheme() {
                 // Delegate to applyConfigTheme() which enforces the theme correctly
@@ -1476,7 +1473,7 @@ export class DocumentRenderer {
                         const outline = document.getElementById('outlinePanel');
                         const button = document.getElementById('toggleOutline');
                         outline.classList.toggle('hidden', !outlineVisible);
-                        button.textContent = outlineVisible ? '◧' : '◨';
+                        button.classList.toggle('active', outlineVisible);
                         break;
                     case 'updateTheme':
                         currentTheme = message.theme;
