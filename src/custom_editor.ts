@@ -118,14 +118,16 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider {
                     if (!this.activeWebviewPanels.has(uriString)) {
                         return;
                     }
-                    const st = this.getOrCreateState(uriString);
-                    await DocumentRenderer.renderDocument(document.uri, webviewPanel, {
-                        zoom: st.zoom,
-                        outlineVisible: st.outlineVisible,
-                        toolbarVisible: st.toolbarVisible,
-                        theme: st.currentTheme
-                    });
-                }, 1500);
+                    // Swap the content in place: no loading screen, no page reload.
+                    // A file caught half-written (Word saves in steps) is retried once.
+                    if (!await DocumentRenderer.updateDocument(document.uri, webviewPanel)) {
+                        setTimeout(() => {
+                            if (this.activeWebviewPanels.has(uriString)) {
+                                DocumentRenderer.updateDocument(document.uri, webviewPanel);
+                            }
+                        }, 1000);
+                    }
+                }, 600);
             };
             watcher.onDidChange(reload);
             watcher.onDidCreate(reload);

@@ -22,6 +22,7 @@ Fork of the original extension by Shahil Kumar; see "What's new in this fork" in
 - **Light/Dark Toggle** - The theme button switches between light and dark (no longer cycles through auto). It is also shown in the collapsed mini-toolbar next to ⚙️, and the "Toggle Theme" command does the same
 - **Redesigned Toolbar** - One floating bar with line icons (no emoji), grouped as outline | zoom | find, markup, theme | collapse, with a tooltip on every button. The toolbar is shown by default; the collapse button folds it into a small theme + expand pill
 - **Find Panel** - Restyled to match the toolbar (search icon, borderless input, arrow buttons)
+- **Smooth Live Refresh** - When the file changes on disk the new content is swapped into the open viewer in place, like a LaTeX PDF preview: no loading screen, and the toolbar, outline, view, search and scroll position stay as they are. If Word is still writing the file, the current view stays until the next change
 - **Theme Kept on Reload** - The chosen theme now survives the auto-reload after the file changes on disk
 
 ---

@@ -80,6 +80,36 @@ export class DocumentRenderer {
         }
     }
 
+    /**
+     * Refresh an open viewer in place after the file changed on disk: render the document again
+     * and send only the new content to the webview, which swaps it without reloading the page
+     * (no loading screen, toolbar/outline/scroll position untouched). If the file cannot be read
+     * (e.g. Word is still writing it), the current view is kept and the caller retries.
+     */
+    public static async updateDocument(uri: vscode.Uri, panel: vscode.WebviewPanel): Promise<boolean> {
+        const p = uri.fsPath.toLowerCase();
+        try {
+            let html: string;
+            if (p.endsWith('.docx')) {
+                html = await DocxHandler.renderDocx(uri);
+            } else if (p.endsWith('.odt')) {
+                html = await OdtHandler.renderOdt(uri);
+            } else {
+                return true;
+            }
+            const processed = this.processDocumentHtmlAndExtractOutline(html);
+            await panel.webview.postMessage({
+                command: 'updateContent',
+                html: processed.html,
+                outlineHtml: this.generateOutlineHtml(processed.outline),
+            });
+            return true;
+        } catch (error) {
+            console.warn('Docx Reader: refresh skipped, file not readable yet:', error);
+            return false;
+        }
+    }
+
     private static generateEnhancedHtml(documentHtml: string, outline: OutlineItem[], font: string, theme: string, filePath: string): string {
         const fileName = path.basename(filePath);
 
@@ -1279,23 +1309,18 @@ export class DocumentRenderer {
                 }
             }
             
-            // Outline navigation
-            document.querySelectorAll('.docx-outline-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const targetId = item.getAttribute('data-target');
-                    const target = document.getElementById(targetId);
-                    
-                    if (target) {
-                        // Remove active class from all outline items
-                        document.querySelectorAll('.docx-outline-item').forEach(i => i.classList.remove('active'));
-                        
-                        // Add active class to clicked item
-                        item.classList.add('active');
-                        
-                        // Scroll to target
-                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                });
+            // Outline navigation (delegated: the outline is replaced on a live refresh)
+            document.getElementById('outlinePanel').addEventListener('click', (event) => {
+                const item = event.target.closest('.docx-outline-item');
+                if (!item) {
+                    return;
+                }
+                const target = document.getElementById(item.getAttribute('data-target'));
+                if (target) {
+                    document.querySelectorAll('.docx-outline-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             });
             
             // Search functionality
@@ -1460,10 +1485,43 @@ export class DocumentRenderer {
                 });
             }
 
+            // Live refresh: replace the document content without reloading the page. The new
+            // content is laid out in the same task, so the old page is never seen blank.
+            function updateContent(html, outlineHtml) {
+                const doc = document.getElementById('document');
+                const top = scroller ? scroller.scrollTop : 0;
+                const searching = document.getElementById('searchPanel').classList.contains('visible');
+                clearSearchResults();
+                doc.innerHTML = html;
+                const outline = document.getElementById('outlinePanel');
+                outline.innerHTML = '<h3>Outline</h3>' + outlineHtml;
+                const markup = document.getElementById('toggleMarkup');
+                if (markup) {
+                    const has = doc.querySelector('.tc') || document.getElementById('docx-comments');
+                    markup.style.display = has ? '' : 'none';
+                }
+                const relayout = () => {
+                    const t = scroller ? scroller.scrollTop : 0;
+                    layout();
+                    if (scroller) { scroller.scrollTop = t; }
+                };
+                layout();
+                if (scroller) { scroller.scrollTop = top; }
+                doc.querySelectorAll('img').forEach(img => {
+                    if (!img.complete) { img.addEventListener('load', relayout, { once: true }); }
+                });
+                if (searching && document.getElementById('searchInput').value) {
+                    performSearch();
+                }
+            }
+
             // Handle messages from extension
             window.addEventListener('message', event => {
                 const message = event.data;
                 switch (message.command) {
+                    case 'updateContent':
+                        updateContent(message.html, message.outlineHtml);
+                        break;
                     case 'updateZoom':
                         currentZoom = message.zoom;
                         updateZoom();
